@@ -1,0 +1,21 @@
+# Browser login profile (cookies, sessions) - never commit
+.browser-profile/
+
+# Playwright MCP snapshots, screenshots and console logs
+.playwright-mcp/
+
+# Local credentials and environment files
+.env
+.env.*
+*.secret
+secrets/
+credentials*
+
+# Local Claude settings
+.claude/settings.local.json
+
+# OS / editor noise
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
