@@ -4,6 +4,13 @@
 # Playwright MCP snapshots, screenshots and console logs
 .playwright-mcp/
 
+# Excel files for quiz import
+Upload/
+*.xlsx
+
+# Office temporary lock files
+~$*
+
 # Local credentials and environment files
 .env
 .env.*
