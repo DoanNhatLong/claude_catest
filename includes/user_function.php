@@ -32,18 +32,53 @@ add_action( 'template_redirect', 'enforce_province_selection' );
 /**
  * 2. Xử lý lưu Tỉnh bang khi người dùng submit form chọn
  */
+/**
+ * Return the list of valid province codes (region_code meta, falling back to slug).
+ */
+function snnj_get_valid_region_codes() {
+    $codes   = array();
+    $regions = get_terms( array( 'taxonomy' => 'site_region', 'hide_empty' => false ) );
+    if ( ! empty( $regions ) && ! is_wp_error( $regions ) ) {
+        foreach ( $regions as $region ) {
+            $code    = get_term_meta( $region->term_id, 'region_code', true );
+            $codes[] = ! empty( $code ) ? $code : $region->slug;
+        }
+    }
+    return $codes;
+}
+
+/**
+ * Save the user's province on first-time setup only.
+ * Later changes must go through the admin-reviewed change request flow.
+ */
 function save_user_selected_province() {
-    if ( is_user_logged_in() && isset( $_POST['selected_province'] ) ) {
-        $user_id  = get_current_user_id();
-        $province = sanitize_text_field( $_POST['selected_province'] );
-        
-        // Lưu giá trị vào user meta
-        update_user_meta( $user_id, 'user_province', $province );
-        
-        // Lưu xong thì đưa người dùng quay lại trang chủ
-        wp_safe_redirect( home_url( '/memberhome' ) );
+    if ( ! is_user_logged_in() ) {
+        wp_safe_redirect( home_url( '/' ) );
         exit;
     }
+
+    $nonce = isset( $_POST['snnj_province_nonce'] ) ? sanitize_key( wp_unslash( $_POST['snnj_province_nonce'] ) ) : '';
+    if ( ! wp_verify_nonce( $nonce, 'snnj_save_province' ) ) {
+        wp_die( 'Invalid or expired request. Please reload the page and try again.', 'Request error', array( 'response' => 403 ) );
+    }
+
+    $user_id = get_current_user_id();
+
+    // Province is locked once set.
+    if ( '' !== (string) get_user_meta( $user_id, 'user_province', true ) ) {
+        wp_safe_redirect( home_url( '/memberhome/' ) );
+        exit;
+    }
+
+    $province = isset( $_POST['selected_province'] ) ? sanitize_text_field( wp_unslash( $_POST['selected_province'] ) ) : '';
+    if ( ! in_array( $province, snnj_get_valid_region_codes(), true ) ) {
+        wp_safe_redirect( home_url( '/provinces/' ) );
+        exit;
+    }
+
+    update_user_meta( $user_id, 'user_province', $province );
+    wp_safe_redirect( home_url( '/memberhome/' ) );
+    exit;
 }
 add_action( 'admin_post_save_province', 'save_user_selected_province' );
 add_action( 'admin_post_nopriv_save_province', 'save_user_selected_province' );
@@ -106,6 +141,7 @@ function render_province_selection_form() {
             
             <form action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" method="POST">
                 <input type="hidden" name="action" value="save_province">
+                <?php wp_nonce_field( 'snnj_save_province', 'snnj_province_nonce' ); ?>
                 
                 <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 25px; max-height: 350px; overflow-y: auto; padding-right: 5px;">
                     <?php
