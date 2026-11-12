@@ -8,6 +8,8 @@
 
 ## Rules
 
+- Before starting any task, give the user an estimate of the token usage it will take (a rough range plus the main cost drivers: files to read/write, builds, browser checks). Wait for the user's approval before doing the work. Do not start until they agree.
+
 - Frontend code only. No backend, no database, no server-side code.
 - Never call the live site (https://catest.ca), its REST API, or wp-admin from this mock.
 - Never put credentials, API keys, or anything from `../.env` or `../.browser-profile/` in this folder.
