@@ -168,3 +168,46 @@ main { padding: 80px 0; }
 .guest-sub a:hover { color: var(--blue); }
 a:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
 .site-footer a:focus-visible { outline-color: #93c5fd; }
+
+button.btn { border: none; cursor: pointer; font: inherit; font-weight: 600; }
+
+/* Province picker modal */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(15, 23, 42, 0.55);
+}
+.modal {
+  position: relative; width: 780px; max-height: calc(100vh - 80px); overflow-y: auto;
+  background: #fff; border-radius: 16px; padding: 36px 36px 32px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+}
+.modal-close {
+  position: absolute; top: 14px; right: 16px; width: 36px; height: 36px;
+  border: none; border-radius: 50%; background: #f1f5f9; color: var(--muted);
+  font-size: 22px; line-height: 1; cursor: pointer;
+}
+.modal-close:hover { background: #e2e8f0; color: var(--text); }
+.modal-close:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+.modal-title { font-size: 26px; font-weight: 800; margin-bottom: 6px; }
+.modal-lead { margin: 0 0 24px; color: var(--muted); font-size: 15px; }
+.modal-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.modal-province {
+  display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 10px; background: #f8fafc;
+  font-size: 14px; line-height: 1.25; color: var(--text);
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.modal-province:hover { border-color: var(--blue); background: #eff6ff; }
+.modal-code {
+  flex: none; width: 34px; padding: 3px 0; border-radius: 6px; text-align: center;
+  background: #e3effc; color: var(--blue-dark); font-size: 12px; font-weight: 700;
+}
+
+/* Test selection placeholder page */
+.practice-page { text-align: center; padding: 100px 40px; }
+.practice-page p { font-size: 17px; margin: 0 0 32px; }
+.practice-code {
+  display: inline-block; margin-bottom: 16px; padding: 6px 16px; border-radius: 999px;
+  background: #e3effc; color: var(--blue-dark); font-weight: 800; letter-spacing: 0.08em;
+}

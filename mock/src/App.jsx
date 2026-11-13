@@ -1,4 +1,8 @@
-import { PROVINCES, STEPS, FOOTER_COLUMNS } from './data.js';
+import { useState } from 'react';
+import { Routes, Route, Link } from 'react-router-dom';
+import { PROVINCES, STEPS, FOOTER_COLUMNS, practicePath } from './data.js';
+import ProvinceModal from './ProvinceModal.jsx';
+import PracticePage from './PracticePage.jsx';
 
 function Placeholder({ label, className = '' }) {
   return (
@@ -12,10 +16,10 @@ function Header() {
   return (
     <header className="site-header">
       <div className="container header-inner">
-        <a className="brand" href="#top">
+        <Link className="brand" to="/">
           <span className="brand-check" aria-hidden="true">✓</span>
           Canada driving tests
-        </a>
+        </Link>
 
         <div className="guest-info">
           <div>
@@ -35,7 +39,7 @@ function Header() {
   );
 }
 
-function Hero() {
+function Hero({ onStart }) {
   return (
     <section className="hero">
       <h1>
@@ -45,7 +49,7 @@ function Hero() {
         Handbook pages won’t dodge black ice. Real exam-like questions, plain-English explanations and hazard
         video clips turn nerves into calm confidence – so the real test feels like déjà vu.
       </p>
-      <a className="btn btn-solid btn-lg" href="#start">Try practice test for free</a>
+      <button type="button" className="btn btn-solid btn-lg" onClick={onStart}>Try practice test for free</button>
     </section>
   );
 }
@@ -82,8 +86,10 @@ function Introduce() {
       <div className="introduce-grid">
         <div className="card province-card">
           <div className="province-grid">
-            {PROVINCES.map((name) => (
-              <a className="province-btn" href="#province" key={name}>{name}</a>
+            {PROVINCES.map((province) => (
+              <Link className="province-btn" to={practicePath(province.code)} key={province.code}>
+                {province.name}
+              </Link>
             ))}
           </div>
         </div>
@@ -117,11 +123,11 @@ function Local() {
   );
 }
 
-function ReadyToStart() {
+function ReadyToStart({ onStart }) {
   return (
     <section className="ready">
       <h2 className="section-title">Ready to start ?</h2>
-      <a className="btn btn-solid" href="#start">Try practice test for free</a>
+      <button type="button" className="btn btn-solid" onClick={onStart}>Try practice test for free</button>
       <Placeholder label="Laptop showing a practice test" className="laptop-placeholder" />
     </section>
   );
@@ -151,19 +157,35 @@ function Footer() {
   );
 }
 
+function HomePage() {
+  const [isPickerOpen, setPickerOpen] = useState(false);
+  const openPicker = () => setPickerOpen(true);
+
+  return (
+    <>
+      <main className="container">
+        <div className="content-card">
+          <Hero onStart={openPicker} />
+          <Steps />
+          <Introduce />
+          <Local />
+          <ReadyToStart onStart={openPicker} />
+        </div>
+      </main>
+      {isPickerOpen && <ProvinceModal onClose={() => setPickerOpen(false)} />}
+    </>
+  );
+}
+
 export default function App() {
   return (
     <div id="top">
       <Header />
-      <main className="container">
-        <div className="content-card">
-          <Hero />
-          <Steps />
-          <Introduce />
-          <Local />
-          <ReadyToStart />
-        </div>
-      </main>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/practice/:code" element={<PracticePage />} />
+        <Route path="*" element={<HomePage />} />
+      </Routes>
       <Footer />
     </div>
   );

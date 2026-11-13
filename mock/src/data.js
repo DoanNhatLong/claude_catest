@@ -1,20 +1,29 @@
 // Mock content for the homepage. Text mirrors the public homepage; images are placeholders.
 
+// Region codes as used on the live site (note: Manitoba is "MA" there, not the postal "MB").
 export const PROVINCES = [
-  'Alberta',
-  'British Columbia',
-  'Manitoba',
-  'New Brunswick',
-  'Newfoundland & Labrador',
-  'Northwest Territories',
-  'Nova Scotia',
-  'Nunavut',
-  'Ontario',
-  'Prince Edward Island',
-  'Quebec',
-  'Saskatchewan',
-  'Yukon',
+  { code: 'AB', name: 'Alberta' },
+  { code: 'BC', name: 'British Columbia' },
+  { code: 'MA', name: 'Manitoba' },
+  { code: 'NB', name: 'New Brunswick' },
+  { code: 'NL', name: 'Newfoundland & Labrador' },
+  { code: 'NT', name: 'Northwest Territories' },
+  { code: 'NS', name: 'Nova Scotia' },
+  { code: 'NU', name: 'Nunavut' },
+  { code: 'ON', name: 'Ontario' },
+  { code: 'PE', name: 'Prince Edward Island' },
+  { code: 'QC', name: 'Quebec' },
+  { code: 'SK', name: 'Saskatchewan' },
+  { code: 'YT', name: 'Yukon' },
 ];
+
+export function findProvince(code = '') {
+  return PROVINCES.find((p) => p.code === code.toUpperCase());
+}
+
+export function practicePath(code) {
+  return `/practice/${code}`;
+}
 
 export const STEPS = [
   {
