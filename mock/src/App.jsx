@@ -45,7 +45,7 @@ function Hero() {
         Handbook pages won’t dodge black ice. Real exam-like questions, plain-English explanations and hazard
         video clips turn nerves into calm confidence – so the real test feels like déjà vu.
       </p>
-      <a className="btn btn-outline" href="#start">Try practice test for free</a>
+      <a className="btn btn-solid btn-lg" href="#start">Try practice test for free</a>
     </section>
   );
 }
@@ -53,7 +53,7 @@ function Hero() {
 function Steps() {
   return (
     <section className="steps">
-      <h2 className="steps-title">3 steps to Practice Driving Knowledge Test That Actually Works</h2>
+      <h2 className="section-title">3 steps to Practice Driving Knowledge Test That Actually Works</h2>
       <p className="steps-lead">
         The Smarter &amp; Faster Way to Study for the Drivers Knowledge Test. It just gives you an idea of the
         topics that will be covered in the driver knowledge test, but you shouldn’t rely on it alone to pass the test.
@@ -78,7 +78,7 @@ function Steps() {
 function Introduce() {
   return (
     <section className="introduce">
-      <h2>Introduce</h2>
+      <h2 className="section-title">Introduce</h2>
       <div className="introduce-grid">
         <div className="card province-card">
           <div className="province-grid">
@@ -102,7 +102,7 @@ function Local() {
     <section className="local">
       <div className="local-text">
         <span className="eyebrow">Based on the driver’s handbook</span>
-        <h2>Always current, always local</h2>
+        <h2 className="section-title">Always current, always local</h2>
         <h3>Specific to your province</h3>
         <p>
           We regularly review provincial handbooks and licensing guidance and update affected material when
@@ -120,7 +120,7 @@ function Local() {
 function ReadyToStart() {
   return (
     <section className="ready">
-      <h2>Ready to start ?</h2>
+      <h2 className="section-title">Ready to start ?</h2>
       <a className="btn btn-solid" href="#start">Try practice test for free</a>
       <Placeholder label="Laptop showing a practice test" className="laptop-placeholder" />
     </section>
