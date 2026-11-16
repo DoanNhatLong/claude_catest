@@ -10,6 +10,16 @@
  *    The import is refused if any question title already exists in the database
  *    or is repeated inside the file.
  * 7. Skipped rows are reported with their Excel row number and reason.
+ * 8. Chapter support (2026-11-16). The workbook must contain two sheets:
+ *    - "<CODE>"  (e.g. "AB")  questions:
+ *        A = row no. (ignored), B = chapter no., C = order inside the test,
+ *        D = question no. (used for the question code), E = question,
+ *        F-I = answers A-D, J = explanation, K = correct letter,
+ *        L = question category ID (falls back to the form value).
+ *    - "<CODE>i" (e.g. "ABi") chapters: A = chapter no., B = chapter title.
+ *    Each chapter becomes one quiz category titled "<CODE> | <chapter title>".
+ *    Inside a chapter, column C restarting (1, 2, ... then 1 again) starts a
+ *    new test. Each test becomes one quiz whose question_ids follow column C.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -53,6 +63,34 @@ function excel_quiz_import_default_options() {
 }
 
 /**
+ * Convert a cell value such as "2", "2.0" or 2.0 to a positive integer.
+ * Returns 0 when the value is empty or not a whole number.
+ */
+function excel_quiz_import_to_int( $value ) {
+    $value = trim( (string) $value );
+    if ( '' === $value || ! is_numeric( $value ) ) {
+        return 0;
+    }
+    $number = (float) $value;
+    if ( floor( $number ) !== $number || $number < 1 ) {
+        return 0;
+    }
+    return (int) $number;
+}
+
+/**
+ * Find a worksheet index by its exact name (case-insensitive). Returns -1 if missing.
+ */
+function excel_quiz_import_sheet_index( $xlsx, $name ) {
+    foreach ( $xlsx->sheetNames() as $index => $sheetName ) {
+        if ( 0 === strcasecmp( trim( $sheetName ), $name ) ) {
+            return (int) $index;
+        }
+    }
+    return -1;
+}
+
+/**
  * Handle the import request before any output is sent, then redirect (PRG).
  */
 function excel_quiz_import_handle_request() {
@@ -75,13 +113,17 @@ function excel_quiz_import_handle_request() {
 
     global $wpdb;
 
-    $filePath        = $_FILES['excel_file']['tmp_name'];
-    $categoryId      = intval( $_POST['category_id'] );
-    $prefixTitle     = sanitize_text_field( $_POST['prefix_title'] );
-    $quizTitlePrefix = sanitize_text_field( $_POST['quiz_title_prefix'] );
-    $packSize        = intval( $_POST['pack_size'] );
-    $authorId        = 5; // Default author ID.
-    $quizOptionsJson = excel_quiz_import_default_options();
+    $filePath          = $_FILES['excel_file']['tmp_name'];
+    $provinceCode      = strtoupper( preg_replace( '/[^A-Za-z]/', '', (string) $_POST['province_code'] ) );
+    $defaultCategoryId = intval( $_POST['category_id'] );
+    $prefixTitle       = sanitize_text_field( $_POST['prefix_title'] );
+    $quizTitlePrefix   = sanitize_text_field( $_POST['quiz_title_prefix'] );
+    $authorId          = 5; // Default author ID.
+    $quizOptionsJson   = excel_quiz_import_default_options();
+
+    if ( '' === $provinceCode ) {
+        excel_quiz_import_finish( 'error', 'Province code is required (e.g. AB).' );
+    }
 
     $xlsxFilepath = WP_PLUGIN_DIR . '/simplexlsx/SimpleXLSX.php';
     if ( ! file_exists( $xlsxFilepath ) ) {
@@ -94,44 +136,83 @@ function excel_quiz_import_handle_request() {
         excel_quiz_import_finish( 'error', 'Could not read the Excel file: ' . \Shuchkin\SimpleXLSX::parseError() );
     }
 
-    $rows = $xlsx->rows();
-    if ( empty( $rows ) ) {
-        excel_quiz_import_finish( 'error', 'The Excel file is empty.' );
+    $questionSheet = excel_quiz_import_sheet_index( $xlsx, $provinceCode );
+    $chapterSheet  = excel_quiz_import_sheet_index( $xlsx, $provinceCode . 'i' );
+    if ( $questionSheet < 0 || $chapterSheet < 0 ) {
+        excel_quiz_import_finish(
+            'error',
+            'The file must contain the sheets "' . $provinceCode . '" (questions) and "' . $provinceCode . 'i" (chapters). Sheets found: ' . implode( ', ', $xlsx->sheetNames() ) . '.'
+        );
     }
 
     // ------------------------------------------------------------------
-    // Step 1: parse and validate every row before touching the database.
+    // Step 1a: read the chapter list (sheet "<CODE>i": A = no., B = title).
     // ------------------------------------------------------------------
-    $questions   = array();
+    $chapters = array(); // chapter no. => title
+    foreach ( $xlsx->rows( $chapterSheet ) as $index => $row ) {
+        $chapterNo    = excel_quiz_import_to_int( isset( $row[0] ) ? $row[0] : '' );
+        $chapterTitle = isset( $row[1] ) ? sanitize_text_field( trim( (string) $row[1] ) ) : '';
+        if ( 0 === $chapterNo || '' === $chapterTitle ) {
+            continue; // Header or empty row.
+        }
+        if ( isset( $chapters[ $chapterNo ] ) ) {
+            excel_quiz_import_finish( 'error', 'Import cancelled: chapter number ' . $chapterNo . ' appears more than once in sheet "' . $provinceCode . 'i". Nothing was saved.' );
+        }
+        $chapters[ $chapterNo ] = $chapterTitle;
+    }
+
+    if ( empty( $chapters ) ) {
+        excel_quiz_import_finish( 'error', 'No chapters were found in sheet "' . $provinceCode . 'i".' );
+    }
+
+    // ------------------------------------------------------------------
+    // Step 1b: parse and validate every question row before touching the database.
+    // ------------------------------------------------------------------
+    $tests       = array(); // list of array( 'chapter' => no., 'number' => test no., 'questions' => array( order => question ) )
+    $testCount   = array(); // chapter no. => number of tests so far
     $skippedRows = array(); // Fix 7: collect skipped rows with a reason.
     $seenTitles  = array();
+    $current     = -1;      // Index in $tests of the test being filled.
+    $prevChapter = 0;
+    $prevOrder   = 0;
 
-    foreach ( $rows as $index => $row ) {
+    foreach ( $xlsx->rows( $questionSheet ) as $index => $row ) {
         $excelRow = $index + 1; // Excel rows are 1-based.
 
-        $sttStr       = isset( $row[0] ) ? trim( (string) $row[0] ) : '';
-        $questionText = isset( $row[1] ) ? trim( (string) $row[1] ) : '';
+        $chapterStr   = isset( $row[1] ) ? trim( (string) $row[1] ) : '';
+        $orderStr     = isset( $row[2] ) ? trim( (string) $row[2] ) : '';
+        $sttStr       = isset( $row[3] ) ? trim( (string) $row[3] ) : '';
+        $questionText = isset( $row[4] ) ? trim( (string) $row[4] ) : '';
 
         // Completely empty rows are ignored silently.
-        if ( '' === $sttStr && '' === $questionText ) {
+        if ( '' === $chapterStr && '' === $orderStr && '' === $sttStr && '' === $questionText ) {
             continue;
         }
 
-        if ( ! is_numeric( $sttStr ) ) {
-            // A non-numeric first row is treated as the header row.
-            if ( 0 === $index ) {
-                continue;
-            }
-            $skippedRows[] = 'Row ' . $excelRow . ': the No. column (A) is not a number ("' . $sttStr . '").';
+        $chapterNo = excel_quiz_import_to_int( $chapterStr );
+        $order     = excel_quiz_import_to_int( $orderStr );
+        $stt       = excel_quiz_import_to_int( $sttStr );
+
+        if ( 0 === $chapterNo && 0 === $index ) {
+            continue; // A non-numeric first row is treated as the header row.
+        }
+        if ( 0 === $chapterNo || ! isset( $chapters[ $chapterNo ] ) ) {
+            $skippedRows[] = 'Row ' . $excelRow . ': chapter (B) "' . $chapterStr . '" is not listed in sheet "' . $provinceCode . 'i".';
             continue;
         }
-
+        if ( 0 === $order ) {
+            $skippedRows[] = 'Row ' . $excelRow . ': order (C) is not a positive whole number ("' . $orderStr . '").';
+            continue;
+        }
+        if ( 0 === $stt ) {
+            $skippedRows[] = 'Row ' . $excelRow . ': question no. (D) is not a positive whole number ("' . $sttStr . '").';
+            continue;
+        }
         if ( '' === $questionText ) {
-            $skippedRows[] = 'Row ' . $excelRow . ': the question column (B) is empty.';
+            $skippedRows[] = 'Row ' . $excelRow . ': the question column (E) is empty.';
             continue;
         }
 
-        $stt           = (int) $sttStr;
         $questionTitle = $prefixTitle . str_pad( $stt, 4, '0', STR_PAD_LEFT );
 
         // Fix 2: the same question title must not appear twice in one file.
@@ -143,30 +224,52 @@ function excel_quiz_import_handle_request() {
         }
         $seenTitles[ $questionTitle ] = $excelRow;
 
-        $questions[] = array(
+        // A new test starts when the chapter changes or column C goes back (1, 2, ... 30, then 1).
+        if ( $chapterNo !== $prevChapter || $order <= $prevOrder ) {
+            $testCount[ $chapterNo ] = isset( $testCount[ $chapterNo ] ) ? $testCount[ $chapterNo ] + 1 : 1;
+            $tests[]                 = array(
+                'chapter'   => $chapterNo,
+                'number'    => $testCount[ $chapterNo ],
+                'questions' => array(),
+            );
+            $current = count( $tests ) - 1;
+        }
+        $prevChapter = $chapterNo;
+        $prevOrder   = $order;
+
+        $categoryCell = isset( $row[11] ) ? excel_quiz_import_to_int( $row[11] ) : 0;
+
+        $tests[ $current ]['questions'][ $order ] = array(
             'stt'         => $stt,
+            'row'         => $excelRow,
             'title'       => $questionTitle,
             // Fix 1: strip unsafe HTML (scripts, event handlers) from imported text.
             'question'    => wp_kses_post( $questionText ),
             'answers'     => array(
-                isset( $row[2] ) ? wp_kses_post( trim( (string) $row[2] ) ) : '',
-                isset( $row[3] ) ? wp_kses_post( trim( (string) $row[3] ) ) : '',
-                isset( $row[4] ) ? wp_kses_post( trim( (string) $row[4] ) ) : '',
                 isset( $row[5] ) ? wp_kses_post( trim( (string) $row[5] ) ) : '',
+                isset( $row[6] ) ? wp_kses_post( trim( (string) $row[6] ) ) : '',
+                isset( $row[7] ) ? wp_kses_post( trim( (string) $row[7] ) ) : '',
+                isset( $row[8] ) ? wp_kses_post( trim( (string) $row[8] ) ) : '',
             ),
-            'explanation' => isset( $row[6] ) ? wp_kses_post( trim( (string) $row[6] ) ) : '',
-            'correct'     => isset( $row[7] ) ? strtoupper( trim( (string) $row[7] ) ) : 'A',
-            'category_id' => ( isset( $row[8] ) && '' !== trim( (string) $row[8] ) ) ? trim( (string) $row[8] ) : $categoryId,
+            'explanation' => isset( $row[9] ) ? wp_kses_post( trim( (string) $row[9] ) ) : '',
+            'correct'     => ( isset( $row[10] ) && '' !== trim( (string) $row[10] ) ) ? strtoupper( trim( (string) $row[10] ) ) : 'A',
+            'category_id' => $categoryCell > 0 ? $categoryCell : $defaultCategoryId,
         );
     }
 
-    if ( empty( $questions ) ) {
-        excel_quiz_import_finish( 'error', 'No valid question rows were found in the Excel file.', $skippedRows );
+    if ( empty( $tests ) ) {
+        excel_quiz_import_finish( 'error', 'No valid question rows were found in sheet "' . $provinceCode . '".', $skippedRows );
+    }
+
+    // Questions inside each test follow column C.
+    foreach ( $tests as $t => $test ) {
+        ksort( $tests[ $t ]['questions'] );
     }
 
     $qTable = $wpdb->prefix . 'aysquiz_questions';
     $aTable = $wpdb->prefix . 'aysquiz_answers';
     $zTable = $wpdb->prefix . 'aysquiz_quizes';
+    $cTable = $wpdb->prefix . 'aysquiz_quizcategories';
 
     // ------------------------------------------------------------------
     // Fix 2: refuse the import if any question title already exists.
@@ -191,65 +294,100 @@ function excel_quiz_import_handle_request() {
     // ------------------------------------------------------------------
     $wpdb->query( 'START TRANSACTION' );
 
-    try {
-        $allQuestionIds = array();
+    $questionCount = 0;
+    $summary       = array(); // chapter title => list of test sizes
 
-        foreach ( $questions as $q ) {
-            $inserted_q = $wpdb->insert( $qTable, array(
-                'author_id'      => $authorId,
-                'category_id'    => $q['category_id'],
-                'question'       => $q['question'],
-                'question_title' => $q['title'],
-                'explanation'    => $q['explanation'],
-                'type'           => 'radio',
-                'published'      => 1,
-                'weight'         => 1,
+    try {
+        // One quiz category per chapter used in the file ("AB | 2. Traffic Control").
+        // An existing category with the same title is reused.
+        $chapterCategoryIds = array();
+        foreach ( $tests as $test ) {
+            $chapterNo = $test['chapter'];
+            if ( isset( $chapterCategoryIds[ $chapterNo ] ) ) {
+                continue;
+            }
+            $categoryTitle = $provinceCode . ' | ' . $chapters[ $chapterNo ];
+            $existingId    = $wpdb->get_var(
+                $wpdb->prepare( "SELECT id FROM {$cTable} WHERE title = %s ORDER BY id ASC LIMIT 1", $categoryTitle )
+            );
+
+            if ( $existingId ) {
+                $chapterCategoryIds[ $chapterNo ] = (int) $existingId;
+                continue;
+            }
+
+            $inserted_c = $wpdb->insert( $cTable, array(
+                'title'       => $categoryTitle,
+                'description' => '',
+                'published'   => 1,
             ) );
 
-            if ( false === $inserted_q ) {
-                throw new \Exception( 'Failed to insert question (No. ' . $q['stt'] . '): ' . $wpdb->last_error );
+            if ( false === $inserted_c ) {
+                throw new \Exception( 'Failed to create quiz category "' . $categoryTitle . '": ' . $wpdb->last_error );
             }
-
-            $currentQuestionId = $wpdb->insert_id;
-            $allQuestionIds[]  = $currentQuestionId;
-
-            foreach ( $q['answers'] as $j => $answerText ) {
-                $currentLetter = chr( ord( 'A' ) + $j );
-
-                $inserted_a = $wpdb->insert( $aTable, array(
-                    'question_id' => $currentQuestionId,
-                    'answer'      => $answerText,
-                    'correct'     => ( $currentLetter === $q['correct'] ) ? 1 : 0,
-                    'ordering'    => $j + 1,
-                    'weight'      => 0,
-                ) );
-
-                if ( false === $inserted_a ) {
-                    throw new \Exception( 'Failed to insert answers for question ID ' . $currentQuestionId . ': ' . $wpdb->last_error );
-                }
-            }
+            $chapterCategoryIds[ $chapterNo ] = (int) $wpdb->insert_id;
         }
 
-        // Group questions into quiz packs.
-        $totalPacks = ceil( count( $allQuestionIds ) / $packSize );
-        for ( $p = 0; $p < $totalPacks; $p++ ) {
-            $chunkIds = array_slice( $allQuestionIds, $p * $packSize, $packSize );
-            $packName = $quizTitlePrefix . ' ' . str_pad( $p + 1, 2, '0', STR_PAD_LEFT );
+        foreach ( $tests as $test ) {
+            $testQuestionIds = array();
+
+            foreach ( $test['questions'] as $q ) {
+                $inserted_q = $wpdb->insert( $qTable, array(
+                    'author_id'      => $authorId,
+                    'category_id'    => $q['category_id'],
+                    'question'       => $q['question'],
+                    'question_title' => $q['title'],
+                    'explanation'    => $q['explanation'],
+                    'type'           => 'radio',
+                    'published'      => 1,
+                    'weight'         => 1,
+                ) );
+
+                if ( false === $inserted_q ) {
+                    throw new \Exception( 'Failed to insert question (row ' . $q['row'] . ', No. ' . $q['stt'] . '): ' . $wpdb->last_error );
+                }
+
+                $currentQuestionId = $wpdb->insert_id;
+                $testQuestionIds[] = $currentQuestionId;
+                $questionCount++;
+
+                foreach ( $q['answers'] as $j => $answerText ) {
+                    $currentLetter = chr( ord( 'A' ) + $j );
+
+                    $inserted_a = $wpdb->insert( $aTable, array(
+                        'question_id' => $currentQuestionId,
+                        'answer'      => $answerText,
+                        'correct'     => ( $currentLetter === $q['correct'] ) ? 1 : 0,
+                        'ordering'    => $j + 1,
+                        'weight'      => 0,
+                    ) );
+
+                    if ( false === $inserted_a ) {
+                        throw new \Exception( 'Failed to insert answers for question ID ' . $currentQuestionId . ': ' . $wpdb->last_error );
+                    }
+                }
+            }
+
+            // One quiz per test: "Alberta - 2. Traffic Control - Test 1".
+            $chapterTitle = $chapters[ $test['chapter'] ];
+            $quizName     = $quizTitlePrefix . ' - ' . $chapterTitle . ' - Test ' . $test['number'];
 
             $inserted_z = $wpdb->insert( $zTable, array(
                 'author_id'        => $authorId,
-                'title'            => $packName,
+                'title'            => $quizName,
                 'description'      => '',
-                'quiz_category_id' => $categoryId,
-                'question_ids'     => implode( ',', $chunkIds ),
-                'ordering'         => 0,
+                'quiz_category_id' => $chapterCategoryIds[ $test['chapter'] ],
+                'question_ids'     => implode( ',', $testQuestionIds ),
+                'ordering'         => $test['number'],
                 'published'        => 1,
                 'options'          => $quizOptionsJson,
             ) );
 
             if ( false === $inserted_z ) {
-                throw new \Exception( 'Failed to create quiz pack ' . $packName . ': ' . $wpdb->last_error );
+                throw new \Exception( 'Failed to create quiz ' . $quizName . ': ' . $wpdb->last_error );
             }
+
+            $summary[ $chapterTitle ][] = count( $testQuestionIds );
         }
 
         $wpdb->query( 'COMMIT' );
@@ -258,9 +396,16 @@ function excel_quiz_import_handle_request() {
         excel_quiz_import_finish( 'error', 'Import failed and all changes were rolled back: ' . $e->getMessage(), $skippedRows );
     }
 
+    // e.g. "2. Traffic Control: 3 test(s) (30+30+35)".
+    $summaryLines = array();
+    foreach ( $summary as $chapterTitle => $sizes ) {
+        $summaryLines[] = $chapterTitle . ': ' . count( $sizes ) . ' test(s) (' . implode( '+', $sizes ) . ')';
+    }
+
     excel_quiz_import_finish(
         'success',
-        'Imported ' . count( $allQuestionIds ) . ' question(s) and created ' . $totalPacks . ' quiz pack(s).'
+        'Imported ' . $questionCount . ' question(s) into ' . count( $summary ) . ' chapter(s) and ' . count( $tests ) . ' quiz(zes) for ' . $provinceCode . '. '
+            . implode( '; ', $summaryLines ) . '.'
             . ( $skippedRows ? ' ' . count( $skippedRows ) . ' row(s) were skipped (see below).' : '' ),
         $skippedRows
     );
@@ -303,28 +448,28 @@ function render_excel_quiz_importer_form() {
         <h3>Excel Quiz Importer (SimpleXLSX)</h3>
 
         <p>
-            <label>Excel file (.xlsx):</label><br>
+            <label>Excel file (.xlsx) with sheets "CODE" (questions) and "CODEi" (chapters):</label><br>
             <input type="file" name="excel_file" accept=".xlsx" required style="width:100%;">
         </p>
 
         <p>
-            <label>Quiz Category ID:</label><br>
+            <label>Province code / sheet name (e.g. AB):</label><br>
+            <input type="text" name="province_code" value="AB" required maxlength="5" style="width:100%;">
+        </p>
+
+        <p>
+            <label>Default question category ID (used when column L is empty):</label><br>
             <input type="number" name="category_id" value="26" required style="width:100%;">
         </p>
 
         <p>
             <label>Question code prefix (Prefix Title):</label><br>
-            <input type="text" name="prefix_title" value="YTK5" required style="width:100%;">
+            <input type="text" name="prefix_title" value="ABK5" required style="width:100%;">
         </p>
 
         <p>
-            <label>Quiz pack title prefix:</label><br>
-            <input type="text" name="quiz_title_prefix" value="Yukon Knowledge - Pack" required style="width:100%;">
-        </p>
-
-        <p>
-            <label>Questions per pack (Pack Size):</label><br>
-            <input type="number" name="pack_size" value="20" required style="width:100%;">
+            <label>Quiz title prefix (e.g. Alberta &rarr; "Alberta - 2. Traffic Control - Test 1"):</label><br>
+            <input type="text" name="quiz_title_prefix" value="Alberta" required style="width:100%;">
         </p>
 
         <p>
