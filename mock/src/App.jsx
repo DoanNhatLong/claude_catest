@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Routes, Route, Link } from 'react-router-dom';
-import { PROVINCES, STEPS, FOOTER_COLUMNS, practicePath } from './data.js';
+import { useEffect, useState } from 'react';
+import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import { PROVINCES, STEPS, FOOTER_COLUMNS, INFO_PAGES, practicePath } from './data.js';
+import InfoPage from './InfoPage.jsx';
 import ProvinceModal from './ProvinceModal.jsx';
 import PracticePage from './PracticePage.jsx';
 
@@ -146,7 +147,7 @@ function Footer() {
               <h4>{col.title}</h4>
               <ul>
                 {col.links.map((link) => (
-                  <li key={link}><a href="#footer">{link}</a></li>
+                  <li key={link.path}><Link to={link.path}>{link.label}</Link></li>
                 ))}
               </ul>
             </div>
@@ -177,13 +178,26 @@ function HomePage() {
   );
 }
 
+// Scroll to the top whenever the route changes.
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+  return null;
+}
+
 export default function App() {
   return (
     <div id="top">
+      <ScrollToTop />
       <Header />
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/practice/:code" element={<PracticePage />} />
+        {Object.values(INFO_PAGES).map((page) => (
+          <Route key={page.path} path={page.path} element={<InfoPage page={page} />} />
+        ))}
         <Route path="*" element={<HomePage />} />
       </Routes>
       <Footer />

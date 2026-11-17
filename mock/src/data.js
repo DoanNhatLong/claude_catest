@@ -43,8 +43,18 @@ export const STEPS = [
   },
 ];
 
+// Footer pages. Edit `title` and `body` to set each page's content.
+export const INFO_PAGES = {
+  premium: { path: '/premium', label: 'Upgrade to Premium', title: 'Upgrade to Premium', body: 'Content coming soon.' },
+  about: { path: '/about-us', label: 'About us', title: 'About us', body: 'Content coming soon.' },
+  privacy: { path: '/privacy-policy', label: 'Privacy Policy', title: 'Privacy Policy', body: 'Content coming soon.' },
+  contact: { path: '/contact-us', label: 'Contact us', title: 'Contact us', body: 'Content coming soon.' },
+  testimonial: { path: '/testimonial', label: 'Testimonial', title: 'Testimonial', body: 'Content coming soon.' },
+  terms: { path: '/terms-of-service', label: 'Terms of service', title: 'Terms of service', body: 'Content coming soon.' },
+};
+
 export const FOOTER_COLUMNS = [
-  { title: 'Premium', links: ['Upgrade to Premium'] },
-  { title: 'About', links: ['About us', 'Privacy Policy', 'Contact us'] },
-  { title: 'Resources', links: ['Testimonial', 'Terms of service'] },
+  { title: 'Premium', links: [INFO_PAGES.premium] },
+  { title: 'About', links: [INFO_PAGES.about, INFO_PAGES.privacy, INFO_PAGES.contact] },
+  { title: 'Resources', links: [INFO_PAGES.testimonial, INFO_PAGES.terms] },
 ];

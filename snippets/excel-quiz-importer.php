@@ -317,6 +317,7 @@ function excel_quiz_import_handle_request() {
             }
 
             $inserted_c = $wpdb->insert( $cTable, array(
+                'author_id'   => $authorId,
                 'title'       => $categoryTitle,
                 'description' => '',
                 'published'   => 1,
