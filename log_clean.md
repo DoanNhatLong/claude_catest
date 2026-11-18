@@ -15,7 +15,7 @@ The SQL is run by hand in phpMyAdmin, never by Claude. Always run step 1 first a
   - 4 answers that were already orphan in the backup (their question does not exist).
 - **Condition:** the answer's question does not exist OR its `question_title` does not start with `SIGN`. Correct whether the question cleanup (15:55) has been run or not.
 - **Expected:** 31460 deleted, 892 kept (if the questions of the 15:55 entry are already deleted, the delete count is the same: they become orphans).
-- **Status:** prepared, not yet run.
+- **Status:** RUN by the user in phpMyAdmin (reported done 2026-11-18 16:06; result counts not reported).
 
 Step 1 - check (must return 31460 and 892; stop if different):
 
@@ -48,7 +48,7 @@ WHERE q.id IS NULL OR q.question_title NOT LIKE 'SIGN%';
 - **Condition:** answer's `question_id` does not exist in `snnj_aysquiz_questions`.
 - **When to run:** AFTER the question cleanup. Safe to re-run any time later; it only removes answers with no question.
 - **Expected:** a positive count. If the 7864 questions of the 15:55 entry are deleted and each had 4 answers, roughly 31,000 rows.
-- **Status:** prepared, not yet run.
+- **Status:** NOT run (superseded by 16:03).
 
 Step 1 - check (count of orphan answers):
 
@@ -79,7 +79,7 @@ WHERE q.id IS NULL;
 - **Condition:** `question_title NOT LIKE 'SIGN%'`
 - **Expected:** 7864 deleted, 223 kept.
 - **Not cleaned by this SQL:** answers of the deleted questions stay in `snnj_aysquiz_answers` (orphan rows); quizzes in `snnj_aysquiz_quizes` that still list deleted IDs in `question_ids`.
-- **Status:** prepared, not yet run.
+- **Status:** RUN by the user in phpMyAdmin (reported done 2026-11-18 16:06; result counts not reported).
 
 Step 1 - check (must return 7864 and 223; stop if different):
 
@@ -109,7 +109,7 @@ DELETE FROM snnj_aysquiz_questions WHERE question_title NOT LIKE 'SIGN%';
 - **Expected:** 884 deleted, 11 kept.
 - **Run before the new import:** new quizzes do not match "Traffic Signs" and would be deleted too.
 - **Not cleaned by this SQL:** questions (`snnj_aysquiz_questions`), answers (`snnj_aysquiz_answers`), quiz categories (`snnj_aysquiz_quizcategories`), hidden posts linked by `custom_post_id` (`snnj_posts`).
-- **Status:** prepared, not yet run.
+- **Status:** RUN by the user in phpMyAdmin (reported done 2026-11-18 16:06; result counts not reported).
 
 Step 1 - check (must return 884 and 11; stop if different):
 
@@ -134,7 +134,7 @@ DELETE FROM snnj_aysquiz_quizes WHERE title NOT LIKE 'Traffic Signs -Test %';
 - **Expected:** 884 quizzes deleted (quiz category IDs 24-50 and 64-72), 11 kept (all in quiz category 17).
 - **Run before the new import:** the new quizzes do not match "Traffic Signs" and would be deleted too.
 - **Not cleaned by this SQL:** questions (`snnj_aysquiz_questions`), answers (`snnj_aysquiz_answers`), quiz categories (`snnj_aysquiz_quizcategories`), and the hidden posts linked by `custom_post_id` (`snnj_posts`).
-- **Status:** prepared, not yet run.
+- **Status:** NOT run separately (same SQL was run via the 15:47 entry).
 
 Step 1 - check (must return 884 and 11):
 
