@@ -5,6 +5,69 @@ The SQL is run by hand in phpMyAdmin, never by Claude. Always run step 1 first a
 
 ---
 
+## 2026-11-18 16:03 (+07:00) - Delete every answer except those of "SIGN..." questions
+
+- **Purpose:** Clean `snnj_aysquiz_answers` so only the answers of the 223 sign questions (`SIGN###`) remain. Replaces the 15:59 entry below.
+- **Source backups:** `snnj_aysquiz_answers_backup.sql` (2.5 MB, modified 2026-11-18 16:01; columns `id`, `question_id` only) and `snnj_aysquiz_questions_backup.sql` (columns `id`, `question_title` only), scanned by a local script.
+- **Scan result:** 32352 answers. 892 belong to SIGN questions (exactly 4 per question, all 223 SIGN questions have answers).
+- **Will be deleted (31460):**
+  - 31456 answers of non-SIGN questions (4 per question x 7864): `ABK` 2352, `ABKT` 2352, `BCK` 2292, `MAK` 2292, `NBK` 2188, `NLK` 2324, `NSK` 2264, `NTK` 2308, `NUK` 2200, `ONK` 2252, `PEK` 2072, `QCK` 2196, `SKK` 2080, `YTK` 2276, `YTC` 8
+  - 4 answers that were already orphan in the backup (their question does not exist).
+- **Condition:** the answer's question does not exist OR its `question_title` does not start with `SIGN`. Correct whether the question cleanup (15:55) has been run or not.
+- **Expected:** 31460 deleted, 892 kept (if the questions of the 15:55 entry are already deleted, the delete count is the same: they become orphans).
+- **Status:** prepared, not yet run.
+
+Step 1 - check (must return 31460 and 892; stop if different):
+
+```sql
+SELECT COUNT(*) FROM snnj_aysquiz_answers a
+LEFT JOIN snnj_aysquiz_questions q ON q.id = a.question_id
+WHERE q.id IS NULL OR q.question_title NOT LIKE 'SIGN%';
+
+SELECT COUNT(*) FROM snnj_aysquiz_answers a
+JOIN snnj_aysquiz_questions q ON q.id = a.question_id
+WHERE q.question_title LIKE 'SIGN%';
+```
+
+Step 2 - delete:
+
+```sql
+DELETE a FROM snnj_aysquiz_answers a
+LEFT JOIN snnj_aysquiz_questions q ON q.id = a.question_id
+WHERE q.id IS NULL OR q.question_title NOT LIKE 'SIGN%';
+```
+
+---
+
+## 2026-11-18 15:59 (+07:00) - Delete orphan answers (answers whose question no longer exists)
+
+- **Superseded by the 16:03 entry above** (same goal, with exact counts and a condition that also works before the question cleanup). Use 16:03 instead.
+
+- **Purpose:** Remove rows in `snnj_aysquiz_answers` left behind after questions are deleted (e.g. after the 15:55 entry below).
+- **Source backup:** none needed. The condition is checked directly against the live tables.
+- **Condition:** answer's `question_id` does not exist in `snnj_aysquiz_questions`.
+- **When to run:** AFTER the question cleanup. Safe to re-run any time later; it only removes answers with no question.
+- **Expected:** a positive count. If the 7864 questions of the 15:55 entry are deleted and each had 4 answers, roughly 31,000 rows.
+- **Status:** prepared, not yet run.
+
+Step 1 - check (count of orphan answers):
+
+```sql
+SELECT COUNT(*) FROM snnj_aysquiz_answers a
+LEFT JOIN snnj_aysquiz_questions q ON q.id = a.question_id
+WHERE q.id IS NULL;
+```
+
+Step 2 - delete:
+
+```sql
+DELETE a FROM snnj_aysquiz_answers a
+LEFT JOIN snnj_aysquiz_questions q ON q.id = a.question_id
+WHERE q.id IS NULL;
+```
+
+---
+
 ## 2026-11-18 15:55 (+07:00) - Delete every question except "SIGN..." codes
 
 - **Purpose:** Clean `snnj_aysquiz_questions` so only the sign questions (`question_title` = `SIGN###`) remain.
