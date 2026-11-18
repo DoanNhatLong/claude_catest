@@ -41,7 +41,7 @@ Local working folder: `D:\0 WordPress\Testcatest`
 The goal of reading a backup file (database dump such as `*.sql`, `*.sql.gz`) is ONLY to produce cleanup SQL for a condition I give. Always keep token usage minimal:
 
 1. Every task of this kind needs a token estimate first. Before scanning or reading anything, tell me the file size, what you plan to extract, and the estimated token cost. Then STOP and wait for my approval before you start.
-2. NEVER read a backup file in full and never print large columns (e.g. the `options` JSON of quizzes). Scan it with a local script that extracts only the columns needed for the condition (e.g. `id`, `title`, category ID, `published`).
+2. The ONLY allowed method is a local script that extracts just the columns needed for the condition (e.g. `id`, `title`, category ID, `published`). Reading a backup file in full (with Read, cat, or any other way) is STRICTLY FORBIDDEN. It is not an option: never offer it, never estimate its cost, never compare against it. Never print large columns (e.g. the `options` JSON of quizzes).
 3. Report a compact summary: totals, counts per group (e.g. per category), 1-2 sample titles per group. Do not list every row unless I ask.
 4. Give me the SQL in two steps: (1) `SELECT COUNT(*)` checks with the expected numbers, (2) the `DELETE`/`UPDATE`. Warn about side effects (data that will also be hit, related tables that are NOT cleaned).
 5. NEVER run the SQL yourself, on the live database or anywhere else. I run it in phpMyAdmin.
