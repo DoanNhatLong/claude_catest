@@ -8,6 +8,12 @@
 Upload/
 *.xlsx
 
+# Database dumps and site backups (large, may contain private data) - never commit
+*.sql
+*.sql.gz
+*.wpress
+*.zip
+
 # Office temporary lock files
 ~$*
 
