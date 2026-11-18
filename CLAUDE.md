@@ -54,6 +54,7 @@ The goal of reading a backup file (database dump such as `*.sql`, `*.sql.gz`) is
 - `backups/` - exported or saved copies of previous snippet code
 - `CHANGELOG.md` - change log
 - `log_clean.md` - log of every data-cleanup SQL (time, purpose, condition, SQL)
+- `docs/quiz-import.md` - business rules of the Excel quiz import (data model, Excel layout, naming, current state). Read it before any task about quizzes, the importer or quiz data.
 - `*.sql`, `*.sql.gz`, `*.wpress`, `*.zip` - database dumps / site backups (git-ignored, never commit, never read in full)
 - `.browser-profile/` - browser login profile (never commit, never read)
 - `.env` - catest.ca login credentials (never commit, never print)
