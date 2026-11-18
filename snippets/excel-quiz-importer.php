@@ -17,9 +17,17 @@
  *        F-I = answers A-D, J = explanation, K = correct letter,
  *        L = question category ID (falls back to the form value).
  *    - "<CODE>i" (e.g. "ABi") chapters: A = chapter no., B = chapter title.
- *    Each chapter becomes one quiz category titled "<CODE> | <chapter title>".
  *    Inside a chapter, column C restarting (1, 2, ... then 1 again) starts a
- *    new test. Each test becomes one quiz whose question_ids follow column C.
+ *    new test. Each test becomes one practice quiz whose question_ids follow
+ *    column C, e.g. "Alberta - Practice - 2. Traffic Control 01".
+ * 9. Single quiz category + mock packs (2026-11-18).
+ *    - No categories are created: every quiz goes into the quiz category whose
+ *      ID is typed in the form (e.g. "ABK", created by hand beforehand).
+ *    - After the practice quizzes, all questions are sorted by column D and cut
+ *      into mock packs of N questions (form field; the last pack keeps the
+ *      remainder), e.g. "Alberta - Learner's Tests (K) 01". Mock packs reuse
+ *      the same question IDs; nothing is inserted twice.
+ *    - quiz ordering: practice quizzes first, then mock packs.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -91,6 +99,13 @@ function excel_quiz_import_sheet_index( $xlsx, $name ) {
 }
 
 /**
+ * Read a text field from the form (WordPress adds slashes to $_POST, e.g. "Learner\'s").
+ */
+function excel_quiz_import_post_text( $key ) {
+    return isset( $_POST[ $key ] ) ? trim( sanitize_text_field( wp_unslash( $_POST[ $key ] ) ) ) : '';
+}
+
+/**
  * Handle the import request before any output is sent, then redirect (PRG).
  */
 function excel_quiz_import_handle_request() {
@@ -114,15 +129,39 @@ function excel_quiz_import_handle_request() {
     global $wpdb;
 
     $filePath          = $_FILES['excel_file']['tmp_name'];
-    $provinceCode      = strtoupper( preg_replace( '/[^A-Za-z]/', '', (string) $_POST['province_code'] ) );
-    $defaultCategoryId = intval( $_POST['category_id'] );
-    $prefixTitle       = sanitize_text_field( $_POST['prefix_title'] );
-    $quizTitlePrefix   = sanitize_text_field( $_POST['quiz_title_prefix'] );
+    $provinceCode      = strtoupper( preg_replace( '/[^A-Za-z]/', '', excel_quiz_import_post_text( 'province_code' ) ) );
+    $quizCategoryId    = isset( $_POST['quiz_category_id'] ) ? intval( $_POST['quiz_category_id'] ) : 0;
+    $defaultCategoryId = isset( $_POST['category_id'] ) ? intval( $_POST['category_id'] ) : 0;
+    $prefixTitle       = excel_quiz_import_post_text( 'prefix_title' );
+    $quizTitlePrefix   = excel_quiz_import_post_text( 'quiz_title_prefix' );
+    $practiceKeyword   = excel_quiz_import_post_text( 'practice_keyword' );
+    $mockTitlePrefix   = excel_quiz_import_post_text( 'mock_title_prefix' );
+    $mockPackSize      = isset( $_POST['mock_pack_size'] ) ? intval( $_POST['mock_pack_size'] ) : 0;
     $authorId          = 5; // Default author ID.
     $quizOptionsJson   = excel_quiz_import_default_options();
 
     if ( '' === $provinceCode ) {
         excel_quiz_import_finish( 'error', 'Province code is required (e.g. AB).' );
+    }
+    if ( $quizCategoryId < 1 ) {
+        excel_quiz_import_finish( 'error', 'Quiz category ID is required.' );
+    }
+    if ( $mockPackSize < 1 ) {
+        excel_quiz_import_finish( 'error', 'Questions per mock pack must be at least 1.' );
+    }
+    if ( '' === $prefixTitle || '' === $quizTitlePrefix || '' === $practiceKeyword || '' === $mockTitlePrefix ) {
+        excel_quiz_import_finish( 'error', 'Question code prefix, quiz title prefix, practice keyword and mock title prefix are all required.' );
+    }
+
+    $qTable = $wpdb->prefix . 'aysquiz_questions';
+    $aTable = $wpdb->prefix . 'aysquiz_answers';
+    $zTable = $wpdb->prefix . 'aysquiz_quizes';
+    $cTable = $wpdb->prefix . 'aysquiz_quizcategories';
+
+    // The quiz category (e.g. "ABK") is created by hand beforehand; it must exist.
+    $categoryTitle = $wpdb->get_var( $wpdb->prepare( "SELECT title FROM {$cTable} WHERE id = %d", $quizCategoryId ) );
+    if ( null === $categoryTitle ) {
+        excel_quiz_import_finish( 'error', 'Quiz category ID ' . $quizCategoryId . ' does not exist (Quiz Maker > Quiz Categories).' );
     }
 
     $xlsxFilepath = WP_PLUGIN_DIR . '/simplexlsx/SimpleXLSX.php';
@@ -261,15 +300,10 @@ function excel_quiz_import_handle_request() {
         excel_quiz_import_finish( 'error', 'No valid question rows were found in sheet "' . $provinceCode . '".', $skippedRows );
     }
 
-    // Questions inside each test follow column C.
+    // Questions inside each practice test follow column C.
     foreach ( $tests as $t => $test ) {
         ksort( $tests[ $t ]['questions'] );
     }
-
-    $qTable = $wpdb->prefix . 'aysquiz_questions';
-    $aTable = $wpdb->prefix . 'aysquiz_answers';
-    $zTable = $wpdb->prefix . 'aysquiz_quizes';
-    $cTable = $wpdb->prefix . 'aysquiz_quizcategories';
 
     // ------------------------------------------------------------------
     // Fix 2: refuse the import if any question title already exists.
@@ -295,40 +329,14 @@ function excel_quiz_import_handle_request() {
     $wpdb->query( 'START TRANSACTION' );
 
     $questionCount = 0;
-    $summary       = array(); // chapter title => list of test sizes
+    $practiceSizes = array(); // sizes of the practice quizzes, in creation order
+    $mockSizes     = array(); // sizes of the mock packs, in creation order
+    $ordering      = 0;       // practice quizzes first, then mock packs
 
     try {
-        // One quiz category per chapter used in the file ("AB | 2. Traffic Control").
-        // An existing category with the same title is reused.
-        $chapterCategoryIds = array();
-        foreach ( $tests as $test ) {
-            $chapterNo = $test['chapter'];
-            if ( isset( $chapterCategoryIds[ $chapterNo ] ) ) {
-                continue;
-            }
-            $categoryTitle = $provinceCode . ' | ' . $chapters[ $chapterNo ];
-            $existingId    = $wpdb->get_var(
-                $wpdb->prepare( "SELECT id FROM {$cTable} WHERE title = %s ORDER BY id ASC LIMIT 1", $categoryTitle )
-            );
+        $sttToQuestionId = array(); // column D => inserted question ID (used by the mock packs)
 
-            if ( $existingId ) {
-                $chapterCategoryIds[ $chapterNo ] = (int) $existingId;
-                continue;
-            }
-
-            $inserted_c = $wpdb->insert( $cTable, array(
-                'author_id'   => $authorId,
-                'title'       => $categoryTitle,
-                'description' => '',
-                'published'   => 1,
-            ) );
-
-            if ( false === $inserted_c ) {
-                throw new \Exception( 'Failed to create quiz category "' . $categoryTitle . '": ' . $wpdb->last_error );
-            }
-            $chapterCategoryIds[ $chapterNo ] = (int) $wpdb->insert_id;
-        }
-
+        // Practice quizzes: one quiz per test, e.g. "Alberta - Practice - 2. Traffic Control 01".
         foreach ( $tests as $test ) {
             $testQuestionIds = array();
 
@@ -348,8 +356,9 @@ function excel_quiz_import_handle_request() {
                     throw new \Exception( 'Failed to insert question (row ' . $q['row'] . ', No. ' . $q['stt'] . '): ' . $wpdb->last_error );
                 }
 
-                $currentQuestionId = $wpdb->insert_id;
-                $testQuestionIds[] = $currentQuestionId;
+                $currentQuestionId               = $wpdb->insert_id;
+                $testQuestionIds[]               = $currentQuestionId;
+                $sttToQuestionId[ $q['stt'] ]    = $currentQuestionId;
                 $questionCount++;
 
                 foreach ( $q['answers'] as $j => $answerText ) {
@@ -369,17 +378,22 @@ function excel_quiz_import_handle_request() {
                 }
             }
 
-            // One quiz per test: "Alberta - 2. Traffic Control - Test 1".
-            $chapterTitle = $chapters[ $test['chapter'] ];
-            $quizName     = $quizTitlePrefix . ' - ' . $chapterTitle . ' - Test ' . $test['number'];
+            $quizName = sprintf(
+                '%s - %s - %s %02d',
+                $quizTitlePrefix,
+                $practiceKeyword,
+                $chapters[ $test['chapter'] ],
+                $test['number']
+            );
 
+            $ordering++;
             $inserted_z = $wpdb->insert( $zTable, array(
                 'author_id'        => $authorId,
                 'title'            => $quizName,
                 'description'      => '',
-                'quiz_category_id' => $chapterCategoryIds[ $test['chapter'] ],
+                'quiz_category_id' => $quizCategoryId,
                 'question_ids'     => implode( ',', $testQuestionIds ),
-                'ordering'         => $test['number'],
+                'ordering'         => $ordering,
                 'published'        => 1,
                 'options'          => $quizOptionsJson,
             ) );
@@ -388,7 +402,34 @@ function excel_quiz_import_handle_request() {
                 throw new \Exception( 'Failed to create quiz ' . $quizName . ': ' . $wpdb->last_error );
             }
 
-            $summary[ $chapterTitle ][] = count( $testQuestionIds );
+            $practiceSizes[] = count( $testQuestionIds );
+        }
+
+        // Mock packs: all questions sorted by column D, cut into packs of $mockPackSize.
+        // The last pack keeps the remainder. They reuse the questions inserted above.
+        ksort( $sttToQuestionId );
+        $mockChunks = array_chunk( array_values( $sttToQuestionId ), $mockPackSize );
+
+        foreach ( $mockChunks as $p => $chunkIds ) {
+            $packName = sprintf( '%s - %s %02d', $quizTitlePrefix, $mockTitlePrefix, $p + 1 );
+
+            $ordering++;
+            $inserted_m = $wpdb->insert( $zTable, array(
+                'author_id'        => $authorId,
+                'title'            => $packName,
+                'description'      => '',
+                'quiz_category_id' => $quizCategoryId,
+                'question_ids'     => implode( ',', $chunkIds ),
+                'ordering'         => $ordering,
+                'published'        => 1,
+                'options'          => $quizOptionsJson,
+            ) );
+
+            if ( false === $inserted_m ) {
+                throw new \Exception( 'Failed to create mock pack ' . $packName . ': ' . $wpdb->last_error );
+            }
+
+            $mockSizes[] = count( $chunkIds );
         }
 
         $wpdb->query( 'COMMIT' );
@@ -397,16 +438,11 @@ function excel_quiz_import_handle_request() {
         excel_quiz_import_finish( 'error', 'Import failed and all changes were rolled back: ' . $e->getMessage(), $skippedRows );
     }
 
-    // e.g. "2. Traffic Control: 3 test(s) (30+30+35)".
-    $summaryLines = array();
-    foreach ( $summary as $chapterTitle => $sizes ) {
-        $summaryLines[] = $chapterTitle . ': ' . count( $sizes ) . ' test(s) (' . implode( '+', $sizes ) . ')';
-    }
-
     excel_quiz_import_finish(
         'success',
-        'Imported ' . $questionCount . ' question(s) into ' . count( $summary ) . ' chapter(s) and ' . count( $tests ) . ' quiz(zes) for ' . $provinceCode . '. '
-            . implode( '; ', $summaryLines ) . '.'
+        'Imported ' . $questionCount . ' question(s) for ' . $provinceCode . ' into quiz category "' . $categoryTitle . '" (ID ' . $quizCategoryId . '): '
+            . count( $practiceSizes ) . ' practice quiz(zes) (' . implode( '+', $practiceSizes ) . ') and '
+            . count( $mockSizes ) . ' mock pack(s) (' . implode( '+', $mockSizes ) . ').'
             . ( $skippedRows ? ' ' . count( $skippedRows ) . ' row(s) were skipped (see below).' : '' ),
         $skippedRows
     );
@@ -459,18 +495,38 @@ function render_excel_quiz_importer_form() {
         </p>
 
         <p>
+            <label>Quiz category ID (all practice quizzes and mock packs go here, e.g. the ID of "ABK"):</label><br>
+            <input type="number" name="quiz_category_id" value="" min="1" required style="width:100%;">
+        </p>
+
+        <p>
             <label>Default question category ID (used when column L is empty):</label><br>
             <input type="number" name="category_id" value="26" required style="width:100%;">
         </p>
 
         <p>
             <label>Question code prefix (Prefix Title):</label><br>
-            <input type="text" name="prefix_title" value="ABK5" required style="width:100%;">
+            <input type="text" name="prefix_title" value="ABK" required style="width:100%;">
         </p>
 
         <p>
-            <label>Quiz title prefix (e.g. Alberta &rarr; "Alberta - 2. Traffic Control - Test 1"):</label><br>
+            <label>Quiz title prefix (e.g. Alberta):</label><br>
             <input type="text" name="quiz_title_prefix" value="Alberta" required style="width:100%;">
+        </p>
+
+        <p>
+            <label>Practice keyword (e.g. "Alberta - Practice - 2. Traffic Control 01"):</label><br>
+            <input type="text" name="practice_keyword" value="Practice" required style="width:100%;">
+        </p>
+
+        <p>
+            <label>Mock title prefix (e.g. "Alberta - Learner&#039;s Tests (K) 01"):</label><br>
+            <input type="text" name="mock_title_prefix" value="' . esc_attr( "Learner's Tests (K)" ) . '" required style="width:100%;">
+        </p>
+
+        <p>
+            <label>Questions per mock pack (sorted by column D, the last pack keeps the remainder):</label><br>
+            <input type="number" name="mock_pack_size" value="30" min="1" required style="width:100%;">
         </p>
 
         <p>
