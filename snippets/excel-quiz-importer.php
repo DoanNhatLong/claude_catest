@@ -71,6 +71,22 @@ function excel_quiz_import_default_options() {
 }
 
 /**
+ * Convert a chapter number cell ("0", "2", "2.0" ...) to an integer >= 0.
+ * Chapter 0 is valid (e.g. Manitoba). Returns -1 when empty or not a whole number.
+ */
+function excel_quiz_import_to_chapter( $value ) {
+    $value = trim( (string) $value );
+    if ( '' === $value || ! is_numeric( $value ) ) {
+        return -1;
+    }
+    $number = (float) $value;
+    if ( floor( $number ) !== $number || $number < 0 ) {
+        return -1;
+    }
+    return (int) $number;
+}
+
+/**
  * Convert a cell value such as "2", "2.0" or 2.0 to a positive integer.
  * Returns 0 when the value is empty or not a whole number.
  */
@@ -189,9 +205,9 @@ function excel_quiz_import_handle_request() {
     // ------------------------------------------------------------------
     $chapters = array(); // chapter no. => title
     foreach ( $xlsx->rows( $chapterSheet ) as $index => $row ) {
-        $chapterNo    = excel_quiz_import_to_int( isset( $row[0] ) ? $row[0] : '' );
+        $chapterNo    = excel_quiz_import_to_chapter( isset( $row[0] ) ? $row[0] : '' );
         $chapterTitle = isset( $row[1] ) ? sanitize_text_field( trim( (string) $row[1] ) ) : '';
-        if ( 0 === $chapterNo || '' === $chapterTitle ) {
+        if ( $chapterNo < 0 || '' === $chapterTitle ) {
             continue; // Header or empty row.
         }
         if ( isset( $chapters[ $chapterNo ] ) ) {
@@ -212,7 +228,7 @@ function excel_quiz_import_handle_request() {
     $skippedRows = array(); // Fix 7: collect skipped rows with a reason.
     $seenTitles  = array();
     $current     = -1;      // Index in $tests of the test being filled.
-    $prevChapter = 0;
+    $prevChapter = -1;      // No chapter yet (chapter 0 is a real chapter).
     $prevOrder   = 0;
 
     foreach ( $xlsx->rows( $questionSheet ) as $index => $row ) {
@@ -228,14 +244,15 @@ function excel_quiz_import_handle_request() {
             continue;
         }
 
-        $chapterNo = excel_quiz_import_to_int( $chapterStr );
+        $chapterNo = excel_quiz_import_to_chapter( $chapterStr );
         $order     = excel_quiz_import_to_int( $orderStr );
         $stt       = excel_quiz_import_to_int( $sttStr );
+        $correct   = isset( $row[10] ) ? strtoupper( trim( (string) $row[10] ) ) : '';
 
-        if ( 0 === $chapterNo && 0 === $index ) {
+        if ( $chapterNo < 0 && 0 === $index ) {
             continue; // A non-numeric first row is treated as the header row.
         }
-        if ( 0 === $chapterNo || ! isset( $chapters[ $chapterNo ] ) ) {
+        if ( $chapterNo < 0 || ! isset( $chapters[ $chapterNo ] ) ) {
             $skippedRows[] = 'Row ' . $excelRow . ': chapter (B) "' . $chapterStr . '" is not listed in sheet "' . $provinceCode . 'i".';
             continue;
         }
@@ -249,6 +266,11 @@ function excel_quiz_import_handle_request() {
         }
         if ( '' === $questionText ) {
             $skippedRows[] = 'Row ' . $excelRow . ': the question column (E) is empty.';
+            continue;
+        }
+        if ( ! in_array( $correct, array( 'A', 'B', 'C', 'D' ), true ) ) {
+            // Otherwise the question would be saved with no correct answer.
+            $skippedRows[] = 'Row ' . $excelRow . ': the correct answer (K) must be A, B, C or D ("' . mb_substr( $correct, 0, 30 ) . '").';
             continue;
         }
 
@@ -291,7 +313,7 @@ function excel_quiz_import_handle_request() {
                 isset( $row[8] ) ? wp_kses_post( trim( (string) $row[8] ) ) : '',
             ),
             'explanation' => isset( $row[9] ) ? wp_kses_post( trim( (string) $row[9] ) ) : '',
-            'correct'     => ( isset( $row[10] ) && '' !== trim( (string) $row[10] ) ) ? strtoupper( trim( (string) $row[10] ) ) : 'A',
+            'correct'     => $correct,
             'category_id' => $categoryCell > 0 ? $categoryCell : $defaultCategoryId,
         );
     }

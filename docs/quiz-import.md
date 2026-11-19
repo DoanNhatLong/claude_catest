@@ -21,7 +21,9 @@ History: `CHANGELOG.md` (importer versions), `log_clean.md` (data cleanups).
 
 - Sheet `<CODE>` (e.g. `AB`), one row per question:
   A = row no. (ignored), B = chapter no., C = order inside a practice test, D = question no. (code + mock order), E = question, F-I = answers A-D, J = explanation, K = correct letter, L = question category ID.
-- Sheet `<CODE>i` (e.g. `ABi`): A = chapter no., B = chapter title (e.g. `2. Traffic Control`). Only these two columns.
+- Sheet `<CODE>i` (e.g. `ABi`): A = chapter no., B = chapter title (e.g. `2. Traffic Control`). Only these two columns. Chapter numbers may start at 0 and may have gaps (MA uses 0; BC uses 1,3,4,5,6,8).
+- Column K must be A, B, C or D; other rows are skipped and listed (e.g. MA rows 233, 243, 264 had J and K swapped in `K.xlsx`).
+- Practice test size differs per province (AB about 30, BC about 50); it always follows column C.
 - Source workbook with all provinces: `K.xlsx` (sheets `AB`/`ABi`, `BC`/`BCi`, ... `YT`/`YTi`). Split one province into its own file before import (as done for `AB.xlsx`; keep only the two sheets, drop empty rows and extra columns).
 - Excel files are git-ignored.
 
